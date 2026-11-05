@@ -1,6 +1,10 @@
-import { useMemo } from "react"
+import { useEffect, useMemo, useRef } from 'react'
 import * as THREE from "three"
-import { useControls } from "leva"
+import { button, useControls } from "leva"
+import { clear, createMask, paint, type Point } from './mask'
+import { useFrame, useThree } from '@react-three/fiber'
+
+
 
 type Shape = {
   ribs: number
@@ -41,14 +45,68 @@ export default function Pumpkin() {
         top: {value: 0.1, min: 0, max: 0.3, step: 0.01},
     })
 
+    const mask = useMemo(createMask, [])
+    const brush = useControls('Brush', {
+        size: {value: 30, min: 4, max: 120, step: 1},
+        erase: false,
+        clear: button(() => clear(mask))
+    })
+
+    const controls = useThree((s) => s.controls)as any
+    const setRotate = (on: boolean) => {
+        if(controls)controls.enableRotate = on
+    }
+
+    const drawing = useRef(false)
+    const hovering = useRef(false)
+    const last = useRef<Point | null>(null)
+    const matRef = useRef<THREE.MeshStandardMaterial>(null)
+
+    useEffect(() => {
+        const up = () => {
+            drawing.current = false
+            last.current = null
+            if(controls)controls.enableRotate = !hovering.current
+        }
+        window.addEventListener('pointerup', up)
+        return () => window.removeEventListener('pointerup', up)
+    }, [controls])
+
+    useFrame(({clock}) => {
+        const t= clock.elapsedTime
+        const f = 1 + 0.08 * Math.sin(t*9) + 0.05 * Math.sin(t * 23 + 1.3)
+        if(matRef.current)matRef.current.emissiveIntensity = 2*f
+    })
+
     const geometry = useMemo( () => makePumpkin(shape), [shape.ribs, shape.ribDepth, shape.squash, shape.flatness, shape.top])
 
     return (
         <group position = {[0, -0.85 + shape.squash, 0]}>
-            <mesh geometry={geometry} castShadow>
-                <meshStandardMaterial color="#e8731a" roughness={0.6}/>
+            <mesh 
+            geometry={geometry} 
+            castShadow
+             onPointerDown={(e) => {
+                e.stopPropagation()
+                drawing.current = true
+                last.current = null
+                if(e.uv)last.current = paint(mask, e.uv,null,brush.size,brush.erase )
+             }}
+            onPointerMove={(e) => {
+                if(drawing.current && e.uv)last.current = paint(mask, e.uv,null,brush.size,brush.erase )
+            }}
+            onPointerOver={() => {
+                hovering.current = true
+                setRotate(false)
+            }}
+
+            onPointerOut={() => {
+                hovering.current = false
+                if (!drawing.current) setRotate(true)
+            }}
+            >
+            <meshStandardMaterial ref= {matRef} color="#e8731a" roughness={0.6} emissive='#ffb347' emissiveMap={mask.texture} emissiveIntensity={2} />
             </mesh>
-            <mesh position={[0,0.88,0]} rotation={[0,0,0.15]}>
+            <mesh position={[0, shape.squash - shape.top + 0.13, 0]} rotation={[0, 0, 0.15]}>
                 <cylinderGeometry args={[0.08,0.13,0.3,12]}/>
                 <meshStandardMaterial color="#4a3320" roughness={0.9}/>
             </mesh>

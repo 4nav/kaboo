@@ -19,7 +19,7 @@ export default function App() {
           <planeGeometry args = {[20,20]} />
           <meshStandardMaterial color="#1a1024" roughness={1}/>
         </mesh>
-        <OrbitControls enablePan={false} minDistance={2} maxDistance={8} />
+        <OrbitControls makeDefault enablePan={false} minDistance={2} maxDistance={8} />
       </Canvas>
     </div>
   )
