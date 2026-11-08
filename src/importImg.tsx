@@ -2,9 +2,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from 'three'
 import { button, useControls } from 'leva';
 import {MASKW, MASKH, snapshot, saveMask, type Mask} from './mask'
+import { useThree } from '@react-three/fiber'
+import { facingU } from './presets'
 
 type Mode = 'dark' | 'light' 
-type Overlay = { img: HTMLImageElement; cx: number; cy: number}
+type Overlay = { img?: HTMLImageElement; ready?: HTMLCanvasElement; cx: number; cy: number }
 
 function makeImgCanvas(img: HTMLImageElement, mode: Mode, threshold: number){
     const s = Math.min(1, 1024 / Math.max(img.width, img.height))
@@ -31,6 +33,35 @@ function makeImgCanvas(img: HTMLImageElement, mode: Mode, threshold: number){
     ctx.putImageData(d,0,0)
     return c
 }
+
+function makeShapeCanvas(kind:string){
+    const w = 512
+    const h = kind === 'rectangle' ? 320: 512
+    const c = document.createElement('canvas')
+    c.width = w
+    c.height = h
+    const ctx = c.getContext('2d')!
+    ctx.fillStyle = '#fff'
+    ctx.beginPath()
+    if(kind === 'circle')ctx.ellipse(w/2, h/2, w/2, h/2, 0,0,Math.PI * 2)
+    else if(kind === 'triangle'){
+        ctx.moveTo(w/2,0)
+        ctx.lineTo(w,h)
+        ctx.lineTo(0,h)
+        ctx.closePath()
+    } else if(kind === 'star'){
+        for(let i = 0; i < 10; ++i){
+            const r = (i%2 ? 0.4:1) * (w/2)
+            const a = -Math.PI / 2 + i * Math.PI / 5
+            const x = w/2 + r * Math.cos(a), y = h/2 + r * Math.sin(a)
+            if(i)ctx.lineTo(x,y)
+            else ctx.moveTo(x,y)
+        }
+        ctx.closePath()
+    } else ctx.rect(0,0,w,h)
+    ctx.fill()
+    return c
+} 
 
 function draw(m: Mask, imgCanvas: HTMLCanvasElement, cx: number, cy:number, width: number, rotDeg: number){
     const h = width * (imgCanvas.height / imgCanvas.width)
@@ -94,6 +125,16 @@ export function useImg(mask: Mask){
         setImg({img: image, cx: MASKW*0.25, cy: MASKH*0.5})
     }, [mask, cancel])
 
+    const get = useThree((s) => s.get)
+
+    const beginShape = useCallback((kind:string) => {
+        if(baseRef.current)cancel()
+        snapshot(mask)
+        baseRef.current = mask.undoStack[mask.undoStack.length - 1]
+        const {camera} = get()
+        setImg({ready: makeShapeCanvas(kind), cx: facingU(camera.position.x, camera.position.z) * MASKW, cy: MASKH * 0.5})
+    }, [mask, cancel,get])
+
     const opts = useControls('Image', {
         'import image': button(() => pickImg(begin)),
         mode: {value: 'dark', options: ['dark', 'light']},
@@ -104,9 +145,17 @@ export function useImg(mask: Mask){
         cancel: button(cancel),
     })
 
+    useControls('Shapes', {
+        circle: button(() => beginShape('circle')),
+        square: button(() => beginShape('square')),
+        rectangle: button(() => beginShape('rectangle')),
+        triangle: button(() => beginShape('triangle')),
+        star: button(() => beginShape('star')),
+    })
+
     const imgCanvas = useMemo(
-        () => (img ? makeImgCanvas(img.img, opts.mode as Mode, opts.threshold) : null),
-        [img?.img, opts.mode, opts.threshold]
+        () => !img ? null: (img.ready ?? makeImgCanvas(img.img!, opts.mode as Mode, opts.threshold)),
+        [img?.img, img?.ready, opts.mode, opts.threshold]
     )
 
     useEffect(() => {

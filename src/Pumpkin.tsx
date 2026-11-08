@@ -131,8 +131,7 @@ export default function Pumpkin() {
 
         'export stencil': button(() => downloadStencil(mask)),
         'export render': button(() => {
-            const {gl, scene, camera} = get()
-            gl.render(scene, camera)
+            const {gl} = get()
             download(gl.domElement.toDataURL('image/png'), 'kaboo-render.png')
         }),
     })
@@ -280,6 +279,7 @@ export default function Pumpkin() {
                 <cylinderGeometry args={[0.08, 0.13, 0.3, 12]} />
                 <meshStandardMaterial color="#4a3320" roughness={0.9} />
             </mesh>
+
             {/* hollow interior, lit from a "candle" near the bottom so the wall has a gradient */}
             <mesh geometry={geometry} scale={0.93} raycast={() => null}>
             <meshStandardMaterial ref={matRef} side={THREE.BackSide} color="#7a2e08"

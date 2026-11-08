@@ -15,6 +15,7 @@ export type Mask = {
 }
 
 export type Point = {x:number, y:number}
+export type Shape = 'circle' | 'rectangle' | 'triangle'
 
 export function createMask(): Mask {
     const canvas = document.createElement('canvas')
@@ -121,3 +122,4 @@ export function downloadStencil(m: Mask){ //like irl printout idk if this works
     ctx.fillRect(0,0,MASKW,MASKH)
     download(c.toDataURL('image/png'), 'kaboo-stencil.png')
 }
+
