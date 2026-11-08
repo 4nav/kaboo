@@ -1,9 +1,13 @@
 import { useEffect, useMemo, useRef } from 'react'
 import * as THREE from "three"
 import { button, useControls } from "leva"
-import { clear, createMask, paint, download, downloadStencil, redo, undo, snapshot, load, saveMask, type Point } from './mask'
-import { useFrame, useThree } from '@react-three/fiber'
+import { MASKH, MASKW, clear, createMask, paint, download, downloadStencil, redo, undo, snapshot, load, saveMask, type Point } from './mask'
+import { useFrame, useThree, type ThreeEvent } from '@react-three/fiber'
 import { useImg } from './importImg'
+import { NAMES, facingU, stampFace } from './presets'
+
+const Z_AXIS = new THREE.Vector3(0, 0, 1)
+const tmpNormal = new THREE.Vector3()
 
 type Shape = {
   ribs: number
@@ -46,6 +50,22 @@ function makePumpkin({ribs, ribDepth, squash, flatness, top} : Shape){
 export default function Pumpkin() {
     const saved = useRef(loadShape()).current
     const mask = useMemo(createMask, [])
+    const alpha = useMemo(() => {
+        const canvas = document.createElement('canvas')
+        canvas.width = MASKW
+        canvas.height = MASKH
+        return {canvas, ctx:canvas.getContext('2d')!, texture: new THREE.CanvasTexture(canvas)}
+    }, [])
+    const soft = useMemo(() => {
+        const canvas = document.createElement('canvas')
+        canvas.width = MASKW
+        canvas.height = MASKH
+        return {canvas, ctx: canvas.getContext('2d')!, texture: new THREE.CanvasTexture(canvas)}
+    }, [])
+    const seenSoft = useRef(-1)
+    const lastSoft = useRef(0)
+    const seenVersion = useRef(-1)
+    const lightRef = useRef<THREE.PointLight>(null)
     const { activeRef, onDown, onMove, onUp } = useImg(mask)
     const get = useThree((s) => s.get)
     const brush = useControls('Brush', {
@@ -58,6 +78,9 @@ export default function Pumpkin() {
         squash: {value: saved.squash ?? 0.80, min: 0.5, max: 1, step: 0.01},
         flatness: {value: saved.flatness??1, min: 1, max: 2, step: 0.01},
         top: {value: saved.top??0.06, min: 0, max: 0.3, step: 0.01},
+    })
+    const { internalLight } = useControls('Lighting', {
+        internalLight: {value: true, label: 'Internal light'},
     })
 
 
@@ -87,6 +110,22 @@ export default function Pumpkin() {
         }),
     })
 
+    const faceScaleRef = useRef(1)
+    const {faceSize} = useControls('Faces', {
+        faceSize: {value: 1, min: 0.5, max: 1.6, step: 0.05, label: 'size'}, ...Object.fromEntries(
+            NAMES.map((name:string) => [
+                name,
+                button(() => {
+                    if(activeRef.current)return
+                    const {camera} = get()
+                    stampFace(mask,name, facingU(camera.position.x, camera.position.z), faceScaleRef.current)
+                    saveMask(mask)
+                })
+            ])
+        ),
+    })
+    faceScaleRef.current = faceSize
+
     const controls = useThree((s) => s.controls)as any
 
     const setLeftRotate = (on: boolean) => {
@@ -94,7 +133,7 @@ export default function Pumpkin() {
     }
     useEffect(() => {
         if(controls)controls.mouseButtons.RIGHT = THREE.MOUSE.ROTATE
-    })
+    }, [controls])
 
     useEffect(() => load(mask), [mask])
     useEffect(() => {
@@ -105,6 +144,17 @@ export default function Pumpkin() {
     const hovering = useRef(false)
     const last = useRef<Point | null>(null)
     const matRef = useRef<THREE.MeshStandardMaterial>(null)
+    const ringRef = useRef<THREE.Mesh>(null)
+    const ringMatRef = useRef<THREE.MeshBasicMaterial>(null)
+
+    const moveCursor = (e: ThreeEvent<PointerEvent>) => {
+        const ring = ringRef.current
+        if(!ring || !e.face)return
+        ring.visible = !activeRef.current
+        tmpNormal.copy(e.face.normal)
+        ring.position.copy(e.point).addScaledVector(tmpNormal, 0.004)
+        ring.quaternion.setFromUnitVectors(Z_AXIS, tmpNormal)
+    }
 
     useEffect(() => {
         const up = () => {
@@ -119,9 +169,33 @@ export default function Pumpkin() {
     }, [controls, mask, onUp])
 
     useFrame(({ clock }) => {
+        if(mask.texture.version !== seenVersion.current){
+            seenVersion.current = mask.texture.version
+            const {ctx} = alpha
+            ctx.globalCompositeOperation = 'source-over'
+            ctx.drawImage(mask.canvas, 0,0)
+            ctx.globalCompositeOperation = 'difference'
+            ctx.fillStyle = '#fff'
+            ctx.fillRect(0,0,MASKW, MASKH)
+            ctx.globalCompositeOperation = 'source-over'
+            alpha.texture.needsUpdate = true
+        }
+        const now = performance.now()
+        if(seenSoft.current !== mask.texture.version && now - lastSoft.current > 120){
+            seenSoft.current = mask.texture.version
+            lastSoft.current = now
+            soft.ctx.globalCompositeOperation = 'copy'
+            soft.ctx.filter = 'blur(2px)'
+            soft.ctx.drawImage(alpha.canvas, 0,0)
+            soft.ctx.filter = 'none'
+            soft.texture.needsUpdate = true
+        }
         const t = clock.elapsedTime
         const f = 1 + 0.08 * Math.sin(t * 9) + 0.05 * Math.sin(t * 23 + 1.3)
-        if (matRef.current) matRef.current.emissiveIntensity = 2 * f
+        if (matRef.current) matRef.current.emissiveIntensity = internalLight ? 0.7 * f : 0
+        if(lightRef.current)lightRef.current.intensity = internalLight ? 3*f : 0
+        if(ringRef.current)ringRef.current.scale.setScalar(brush.size * 2 * Math.PI/MASKW)
+        if(ringMatRef.current)ringMatRef.current.color.set(brush.erase ? '#ff5a5a' : "#ffffff") 
     })
 
     useEffect(() => {
@@ -143,6 +217,7 @@ export default function Pumpkin() {
     const geometry = useMemo( () => makePumpkin(shape), [shape.ribs, shape.ribDepth, shape.squash, shape.flatness, shape.top])
 
     return (
+        <>
         <group position = {[0, -0.85 + shape.squash, 0]}>
             <mesh 
             geometry={geometry} 
@@ -157,25 +232,41 @@ export default function Pumpkin() {
                 if(e.uv)last.current = paint(mask, e.uv,last.current,brush.size,brush.erase )
              }}
             onPointerMove={(e) => {
+                moveCursor(e)
                 if(activeRef.current){if (e.uv) onMove(e.uv); return}
-                if(drawing.current && e.uv)last.current = paint(mask, e.uv,null,brush.size,brush.erase )
+                if(drawing.current && e.uv)last.current = paint(mask, e.uv,last.current,brush.size,brush.erase )
             }}
-            onPointerOver={() => {
+            onPointerOver={(e) => {
                 hovering.current = true
                 setLeftRotate(false)
+                moveCursor(e)
             }}
 
             onPointerOut={() => {
                 hovering.current = false
+                if(ringRef.current)ringRef.current.visible = false
                 if (!drawing.current) setLeftRotate(true)
             }}
             >
-            <meshStandardMaterial ref= {matRef} color="#e8731a" roughness={0.6} emissive='#ffb347' emissiveMap={mask.texture} emissiveIntensity={2} />
+            <meshStandardMaterial color="#e8731a" roughness={0.6} alphaMap={alpha.texture} alphaTest={0.5} bumpMap={soft.texture} bumpScale={0.035} />
             </mesh>
-            <mesh position={[0, shape.squash - shape.top + 0.13, 0]} rotation={[0, 0, 0.15]}>
-                <cylinderGeometry args={[0.08,0.13,0.3,12]}/>
-                <meshStandardMaterial color="#4a3320" roughness={0.9}/>
+               <mesh position={[0, shape.squash - shape.top + 0.13, 0]} rotation={[0, 0, 0.15]}>
+                <cylinderGeometry args={[0.08, 0.13, 0.3, 12]} />
+                <meshStandardMaterial color="#4a3320" roughness={0.9} />
             </mesh>
+            {/* hollow interior, lit from a "candle" near the bottom so the wall has a gradient */}
+            <mesh geometry={geometry} scale={0.93} raycast={() => null}>
+            <meshStandardMaterial ref={matRef} side={THREE.BackSide} color="#7a2e08"
+                roughness={1} emissive="#ff8a1f" emissiveIntensity={0.7} />
+        </mesh>
+        <pointLight ref={lightRef} position={[0, -0.4, 0]} color="#ffa040" intensity={3} distance={5} />
         </group>
+
+        <mesh ref={ringRef} visible={false} raycast={() => null}>
+            <ringGeometry args={[0.47, 0.5, 48]}/>
+            <meshBasicMaterial ref={ringMatRef} color="#ffffff" side={THREE.DoubleSide}
+                transparent opacity={0.9} depthWrite={false} toneMapped={false} />
+        </mesh>
+        </>
     )
 }
