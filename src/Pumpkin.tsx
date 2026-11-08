@@ -47,6 +47,29 @@ function makePumpkin({ribs, ribDepth, squash, flatness, top} : Shape){
     return g
 }
 
+const LIGHTS: Record<string, { light: string; glow: string }> = {
+    candle: { light: '#ffa040', glow: '#ff8a1f' },
+    fire: { light: '#ff6a1a', glow: '#ff4a00' },
+    green: { light: '#6dff6a', glow: '#22ff44' },
+    'ghost blue': { light: '#6ab8ff', glow: '#2a7bff' },
+    purple: { light: '#b56aff', glow: '#8a2bff' },
+    red: { light: '#ff4040', glow: '#ff1a1a' },
+    white: { light: '#fff4e0', glow: '#ffe9b0' },
+}
+
+function flicker(kind: string, t:number){
+    switch(kind){
+        case 'steady': return 1
+        case 'fire': return 0.85 + 0.25 * Math.sin(t * 7) * Math.sin(t * 3.1) + 0.12 * Math.sin(t*19 + 2)
+        case 'pulse': return 0.4 + 0.6 * (0.5 + 0.5 * Math.sin(t * 2.4))
+        case 'faulty': {
+            const base = 1 + 0.08 * Math.sin(t*9) + 0.05 * Math.sin(t*23 + 1.3) 
+            return Math.sin(t * 3.7) * Math.sin(t * 13) > 0.8 ? base * 0.25 : base
+        }
+        default: return 1 + 0.08 * Math.sin(t * 9) + 0.05 * Math.sin(t * 23 + 1.3)
+    }
+}
+
 export default function Pumpkin() {
     const saved = useRef(loadShape()).current
     const mask = useMemo(createMask, [])
@@ -79,8 +102,12 @@ export default function Pumpkin() {
         flatness: {value: saved.flatness??1, min: 1, max: 2, step: 0.01},
         top: {value: saved.top??0.06, min: 0, max: 0.3, step: 0.01},
     })
-    const { internalLight } = useControls('Lighting', {
-        internalLight: {value: true, label: 'Internal light'},
+    const light = useControls('Lighting', {
+        on: {value: true, label: 'internal light'},
+        color: {value: 'candle', options: Object.keys(LIGHTS)},
+        flicker: {value: 'candle', options: ['steady', 'candle', 'fire', 'pulse', 'faulty']},
+        brightness: { value: 1, min: 0.2, max: 3, step: 0.05 },
+        height: { value: -0.4, min: -0.8, max: 0.6, step: 0.05 },
     })
 
 
@@ -190,10 +217,9 @@ export default function Pumpkin() {
             soft.ctx.filter = 'none'
             soft.texture.needsUpdate = true
         }
-        const t = clock.elapsedTime
-        const f = 1 + 0.08 * Math.sin(t * 9) + 0.05 * Math.sin(t * 23 + 1.3)
-        if (matRef.current) matRef.current.emissiveIntensity = internalLight ? 0.7 * f : 0
-        if(lightRef.current)lightRef.current.intensity = internalLight ? 3*f : 0
+        const f = flicker(light.flicker, clock.elapsedTime)
+        if (matRef.current) matRef.current.emissiveIntensity = light.on ? 0.7 * f * light.brightness : 0
+        if(lightRef.current)lightRef.current.intensity = light.on ? 3*f*light.brightness : 0
         if(ringRef.current)ringRef.current.scale.setScalar(brush.size * 2 * Math.PI/MASKW)
         if(ringMatRef.current)ringMatRef.current.color.set(brush.erase ? '#ff5a5a' : "#ffffff") 
     })
@@ -257,9 +283,9 @@ export default function Pumpkin() {
             {/* hollow interior, lit from a "candle" near the bottom so the wall has a gradient */}
             <mesh geometry={geometry} scale={0.93} raycast={() => null}>
             <meshStandardMaterial ref={matRef} side={THREE.BackSide} color="#7a2e08"
-                roughness={1} emissive="#ff8a1f" emissiveIntensity={0.7} />
+                roughness={1} emissive={LIGHTS[light.color].glow} emissiveIntensity={0.7} />
         </mesh>
-        <pointLight ref={lightRef} position={[0, -0.4, 0]} color="#ffa040" intensity={3} distance={5} />
+        <pointLight ref={lightRef} position={[0, -0.4, 0]} color={LIGHTS[light.color].light} intensity={3} distance={5} />
         </group>
 
         <mesh ref={ringRef} visible={false} raycast={() => null}>

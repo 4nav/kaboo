@@ -61,7 +61,7 @@ export default function App() {
           <meshStandardMaterial color={bg.ground} roughness={1}/>
         </mesh>
         )}
-        <OrbitControls makeDefault enablePan={false} minDistance={2} maxDistance={8} />
+        <OrbitControls makeDefault enablePan={false} minDistance={2} maxDistance={8} maxPolarAngle={Math.PI / 2 + 0.05} />
       </Canvas>
     </div>
   )
