@@ -1,32 +1,41 @@
-# React + TypeScript + Vite
+# Kaboo 🎃
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+A 3D pumpkin carving studio where you can make and customize your own jack-o'-lantern.
 
-Currently, two official plugins are available:
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+[**Try Kaboo**](https://kaboo-gules.vercel.app/)
 
-## React Compiler
+## Features
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+- **Free carving:** Draw directly onto the pumpkin to carve and erase parts of your design.
+- **Image import:** Import your own images and stamp, move, rotate, and resize them on the pumpkin.
+- **Shapes:** Add circles, rectangles, and triangles to your design.
+- **Face presets:** Start with preset jack-o'-lantern faces.
+- **Custom lighting:** Change the internal lights to get different glowing effects.
+- **Scene customization:** Change the background, ground, and visual effects.
+- **Save your work:** Your designs are saved locally in your browser.
 
-## Expanding the Oxlint configuration
+## Running locally
 
-If you are developing a production application, we recommend enabling type-aware lint rules by installing `oxlint-tsgolint` and editing `.oxlintrc.json`:
+You'll need Node.js and npm.
 
-```json
-{
-  "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["react", "typescript", "oxc"],
-  "options": {
-    "typeAware": true
-  },
-  "rules": {
-    "react/rules-of-hooks": "error",
-    "react/only-export-components": ["warn", { "allowConstantExport": true }]
-  }
-}
+```bash
+git clone https://github.com/4nav/kaboo
+cd kaboo
+npm install
+npm run dev
 ```
 
-See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.
+Open the local URL printed in your terminal.
+
+## How it works
+
+The pumpkin is rendered using React Three Fiber. Carving is handled through a 2D canvas texture mapped onto the pumpkin. Raycasting gets the UV coordinates of the point you're drawing on, which lets the canvas update in the corresponding position.
+
+The canvas is used as an alpha map to create actual holes in the pumpkin, with a darker interior and lighting to give the carved areas their glow.
+
+## Credits
+
+Built with React, TypeScript, Three.js, and React Three Fiber.
+
+Some parts of the project were unfortunately developed with AI assistance, including UI styling, icon generation, the carving effect, and preset faces.
