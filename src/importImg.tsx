@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from 'three'
-import { button, useControls } from 'leva';
 import {MASKW, MASKH, snapshot, saveMask, type Mask} from './mask'
 import { useThree } from '@react-three/fiber'
 import { facingU } from './presets'
+import { isTyping, useUI } from './store'
+
 
 type Mode = 'dark' | 'light' 
 type Overlay = { img?: HTMLImageElement; ready?: HTMLCanvasElement; cx: number; cy: number }
@@ -92,94 +93,123 @@ function pickImg(onImg: (img: HTMLImageElement) => void){
     input.click()
 }
 
-export function useImg(mask: Mask){
-    const [img, setImg] = useState<Overlay | null > (null)
-    const activeRef = useRef(false)
-    const baseRef = useRef<ImageData | null>(null)
-    const placing = useRef(false)
-    activeRef.current = img !== null
+export function useImg(mask: Mask) {
+  const [img, setImg] = useState<Overlay | null>(null)
+  const activeRef = useRef(false)
+  const baseRef = useRef<ImageData | null>(null)
+  const placing = useRef(false)
+  activeRef.current = img !== null
+ 
+  const mode = useUI((s) => s.imgMode)
+  const threshold = useUI((s) => s.imgThreshold)
+  const size = useUI((s) => s.stampSize)
+  const rotation = useUI((s) => s.stampRotation)
+  const get = useThree((s) => s.get)
+ 
+  const cancel = useCallback(() => {
+    if (baseRef.current) {
+      mask.ctx.putImageData(baseRef.current, 0, 0)
+      mask.texture.needsUpdate = true
+      mask.undoStack.pop()
+    }
+    baseRef.current = null
+    placing.current = false
+    setImg(null)
+  }, [mask])
+ 
+  const apply = useCallback(() => {
+    if (!baseRef.current) return
+    baseRef.current = null
+    placing.current = false
+    setImg(null)
+    saveMask(mask)
+  }, [mask])
+ 
+  const startAt = useCallback(
+    (overlay: Omit<Overlay, 'cx' | 'cy'>) => {
+      if (baseRef.current) cancel()
+      snapshot(mask)
+      baseRef.current = mask.undoStack[mask.undoStack.length - 1]
 
-    const cancel = useCallback(() => {
-        if(baseRef.current){
-            mask.ctx.putImageData(baseRef.current, 0,0)
-            mask.texture.needsUpdate = true
-            mask.undoStack.pop()
-        }
-        baseRef.current = null
-        placing.current = false
-        setImg(null)
-    }, [mask])
+      const { camera } = get()
+      useUI.getState().update({ stampRotation: 0, menu: null })
+      setImg({ ...overlay, cx: facingU(camera.position.x, camera.position.z) * MASKW,  cy: MASKH * 0.5, })
+    }, [mask, cancel, get])
+ 
+  const importImage = useCallback(() => pickImg((image) => startAt({ img: image })), [startAt])
+  const beginShape = useCallback((kind: string) => startAt({ ready: makeShapeCanvas(kind) }), [startAt])
+ 
+  const imgActions = useMemo(
+    () => ({ importImage, beginShape, apply, cancel }),
+    [importImage, beginShape, apply, cancel]
+  )
+ 
+  const kind = img ? (img.ready ? 'shape' : 'image') : null
+  useEffect(() => {
+    useUI.getState().update({ stamping: kind })
+  }, [kind])
+ 
+  const imgCanvas = useMemo(() => (!img ? null : img.ready ?? makeImgCanvas(img.img!, mode, threshold)),
+    [img?.img, img?.ready, mode, threshold]
+  )
+ 
+  useEffect(() => {
+    if (!img || !imgCanvas || !baseRef.current) return
+    mask.ctx.putImageData(baseRef.current, 0, 0)
+    draw(mask, imgCanvas, img.cx, img.cy, size, rotation)
+  }, [img, imgCanvas, size, rotation, mask])
+ 
+  useEffect(() => {
+    const onWheel = (e: WheelEvent) => {
+      if (!activeRef.current) return
+      if (!(e.target instanceof HTMLCanvasElement)) return 
+      e.preventDefault()
+      e.stopPropagation() 
 
-    const apply = useCallback(() => {
-        if(!baseRef.current)return
-        baseRef.current = null
-        placing.current = false
-        setImg(null)
-        saveMask(mask)
-    }, [mask])
+      const st = useUI.getState()
+      const f = e.deltaY < 0 ? 1.08 : 0.92
+      st.update({ stampSize: Math.min(2048, Math.max(40, st.stampSize * f)) })
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (!activeRef.current || isTyping(e)) return
 
-    const begin = useCallback((image: HTMLImageElement) => {
-        if(baseRef.current)cancel()
-        snapshot(mask)
-        baseRef.current = mask.undoStack[mask.undoStack.length - 1]
-        setImg({img: image, cx: MASKW*0.25, cy: MASKH*0.5})
-    }, [mask, cancel])
+      const k = e.key.toLowerCase()
+      if (k === 'enter') return apply()
+      if (k === 'escape') return cancel()
+        
+      let r = useUI.getState().stampRotation
+      if (k === 'q') r -= 5
+      else if (k === 'e') r += 5
+      else return
 
-    const get = useThree((s) => s.get)
-
-    const beginShape = useCallback((kind:string) => {
-        if(baseRef.current)cancel()
-        snapshot(mask)
-        baseRef.current = mask.undoStack[mask.undoStack.length - 1]
-        const {camera} = get()
-        setImg({ready: makeShapeCanvas(kind), cx: facingU(camera.position.x, camera.position.z) * MASKW, cy: MASKH * 0.5})
-    }, [mask, cancel,get])
-
-    const opts = useControls('Image', {
-        'import image': button(() => pickImg(begin)),
-        mode: {value: 'dark', options: ['dark', 'light']},
-        threshold: {value: 128, min: 1, max: 254, step: 1},
-        size: {value: 400, min: 40, max: 2048, step: 5},
-        rotation: {value: 0, min: -180, max: 180, step: 1},
-        apply: button(apply),
-        cancel: button(cancel),
-    })
-
-    useControls('Shapes', {
-        circle: button(() => beginShape('circle')),
-        square: button(() => beginShape('square')),
-        rectangle: button(() => beginShape('rectangle')),
-        triangle: button(() => beginShape('triangle')),
-        star: button(() => beginShape('star')),
-    })
-
-    const imgCanvas = useMemo(
-        () => !img ? null: (img.ready ?? makeImgCanvas(img.img!, opts.mode as Mode, opts.threshold)),
-        [img?.img, img?.ready, opts.mode, opts.threshold]
-    )
-
-    useEffect(() => {
-        if(!img || !imgCanvas || !baseRef.current)return
-        mask.ctx.putImageData(baseRef.current, 0,0)
-        draw(mask, imgCanvas, img.cx, img.cy, opts.size, opts.rotation)
-    }, [img, imgCanvas, opts.size, opts.rotation, mask])
-
-    const place = useCallback((uv: THREE.Vector2) => {
-        setImg((s) => (s ? {...s, cx: uv.x * MASKW, cy: (1 - uv.y) * MASKH} : s))
-    }, [])
-
-    const onDown = useCallback((uv: THREE.Vector2) => {
-        placing.current = true
-        place(uv)
-    }, [place])
-
-    const onMove = useCallback((uv: THREE.Vector2) => {
-        if(placing.current)place(uv)
-    }, [place])
-
-    const onUp = useCallback(() => {
-        placing.current = false
-    }, [])
-
-    return {activeRef, onDown, onMove, onUp}
+      if (r > 180) r -= 360
+      if (r < -180) r += 360
+      useUI.getState().update({ stampRotation: r })
+    }
+    window.addEventListener('wheel', onWheel, { capture: true, passive: false })
+    window.addEventListener('keydown', onKey)
+    return () => {
+      window.removeEventListener('wheel', onWheel, { capture: true })
+      window.removeEventListener('keydown', onKey)
+    }
+  }, [apply, cancel])
+ 
+  const place = useCallback((uv: THREE.Vector2) => { setImg((s) => (s ? { ...s, cx: uv.x * MASKW, cy: (1 - uv.y) * MASKH } : s))}, [])
+ 
+  const onDown = useCallback((uv: THREE.Vector2) => {
+      placing.current = true
+      place(uv)
+    },[place]
+  )
+ 
+  const onMove = useCallback((uv: THREE.Vector2) => {
+      if (placing.current) place(uv)
+    }, [place]
+  )
+ 
+  const onUp = useCallback(() => {
+    placing.current = false
+  }, [])
+ 
+  return { activeRef, onDown, onMove, onUp, imgActions }
 }
